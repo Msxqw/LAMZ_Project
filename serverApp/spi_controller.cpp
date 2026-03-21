@@ -23,7 +23,7 @@ bool init()
                    PROT_READ | PROT_WRITE,
                    MAP_SHARED,
                    fd,
-                   BASE_ADDR_SPIAD);
+                   BASE_ADDR_SPI);
 
     if (map_obj == MAP_FAILED)
     {
@@ -50,7 +50,7 @@ void deinit()
     }
 }
 
-void writeReg(uint8_t addr, uint32_t data) //может добавить указатель на конкретный spi, так как сейчас regs используется для конкрентного одного, идентифицировать их
+void writeReg(uint8_t addr, uint32_t data)
 {
     // Адрес/команда записываем в TX_CMD
     *(regs + SPI_TX_CMD_RW) = (uint32_t)(addr);
@@ -59,7 +59,7 @@ void writeReg(uint8_t addr, uint32_t data) //может добавить ука�
     *(regs + SPI_TX_DATA_RW) = data;
 }
 
-uint32_t readReg(uint8_t addr, uint32_t data)
+uint32_t readReg(uint8_t addr)
 {
     // Команда чтения (бит 7 = 1)
     *(regs + SPI_RX_CMD_RW) = (uint32_t)(SPI_READ_BIT | addr);
@@ -69,4 +69,11 @@ uint32_t readReg(uint8_t addr, uint32_t data)
 
     // Чтение результата из RX_DATA
     return *(regs + SPI_RX_DATA_RO);
+}
+
+uint32_t readIPCR()
+{
+    uint32_t value = *(regs + SPI_IP_STNG_RO);
+
+    return value;
 }
