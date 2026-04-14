@@ -9,17 +9,18 @@ int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
 
-    TcpServer server;
+    if(!init())
+    {
+        std::cerr << "Не удалось инициализировать SPI" << std::endl;
+        return 1;
+    }
 
     Parser parser;
+    TcpServer server(&parser, 8080);
 
-    QObject::connect(&server, &TcpServer::dataReceived, &parser, &Parser::process);
-
-    QObject::connect(&parser, &Parser::responseReady, &server, &TcpServer::sendData);
-
-    init();
+    int result = app.exec();
 
     deinit();
 
-    return app.exec()
+    return result;
 }
