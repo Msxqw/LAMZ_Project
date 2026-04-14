@@ -5,21 +5,20 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QByteArray>
+#include <QDebug>
+#include "parser.h"
 
 class TcpServer : public QObject
 {
     Q_OBJECT
 
 public:
-    explicit TcpServer (QObject *parent = nullptr);
+    explicit TcpServer (Parser *parser, int port, QObject *parent = nullptr);
     ~TcpServer();
-    bool start(int port);
-    void stop();
+
 
 signals:
     void dataReceived(const QByteArray &data);
-    void clientConnected();
-    void clientDisconnected();
 
 public slots:
     void sendData(const QByteArray &data);
@@ -31,7 +30,7 @@ private slots:
 
 private:
     QTcpServer *server;
-    QTcpSocket *socket;
+    QTcpSocket *socket = nullptr;
     QByteArray buffer;
 };
 

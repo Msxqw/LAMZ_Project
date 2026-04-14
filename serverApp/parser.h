@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QByteArray>
+#include <QDebug>
 
 class Parser : public QObject
 {
@@ -13,15 +14,15 @@ public:
 
 public slots:
     // Прием данных от Клиента
-    void process(constexpr QByteArray &data);
+    void process(const QByteArray &data);
 
 signals:
     // Отправка ответа Клиенту
-    void responseReady(constexpr QByteArray &data);
+    void responseReady(const QByteArray &data);
 
 private:
     // Обработка SPI-команд
-    void handleSpiRequest(constexpr QByteArray &data);
+    void handleSpiRequest(const QByteArray &data);
 };
 
 #endif // PARSER_H
