@@ -7,7 +7,7 @@ Parser::Parser(QObject *parent) : QObject(parent) {}
 void Parser::process(const QByteArray &data)
 {
     // Проверка минимального размера пакета
-    if (data.size() < static_cast<int>(Protocol::HEADER_SIZE)) {
+    if (data.size() < Protocol::HEADER_SIZE) {
         qDebug() << "Некорректный размер заголовка";
         return;
     }
@@ -15,11 +15,9 @@ void Parser::process(const QByteArray &data)
     // Преобразуем байты в структуру заголовка
     const Protocol::Header *header = reinterpret_cast<const Protocol::Header*>(data.constData());
 
-    switch (header.command)
+    switch (header->command)
     {
     case Protocol::CMD_SPI_WRITE:
-        handleSpiRequest(data);
-        break;
     case Protocol::CMD_SPI_READ:
         handleSpiRequest(data);
         break;
@@ -32,7 +30,7 @@ void Parser::process(const QByteArray &data)
 void Parser::handleSpiRequest(const QByteArray &data)
 {
     // Проверка размера пакета запроса Клиента
-    if (data.size() < static_cast<int>(sizeof(Protocol::SpiRequest))) {
+    if (data.size() < sizeof(Protocol::SpiRequest)) {
         qDebug() << "Некорректный размер запроса SpiRequest";
         return;
     }
@@ -40,34 +38,28 @@ void Parser::handleSpiRequest(const QByteArray &data)
     // Преобразуем байты в структуру запроса
     const Protocol::SpiRequest *req = reinterpret_cast<const Protocol::SpiRequest*>(data.constData());
 
-    // Извлекаем поля
-    uint8_t slave_id = req->slave_id;
-    uint8_t addr     = req->ic_addr;
-    uint32_t value   = req->data_request;
-
     uint32_t result = 0;
     uint8_t status = 1; // Все хорошо
 
-    // Логирование для проверки корректности Request
+    // Логирование для проверки корректности Request (!!!в дальнейшем сделать перегрузку оператора!!!)
     qDebug() << "SPI request:"
              << "cmd=" << req->command
-             << "slave=" << slave_id
-             << "ic_addr=" << addr
-             << "data=" << value;
+             << "slave=" << req->slave_id
+             << "ic_addr=" << req->ic_addr
+             << "data=" << req->data_request;
 
     // Выполнение команды
-    if (req->command == Protocol::CMD_SPI_WRITE)
-    {
-        writeReg(addr, value);
-        result = 0;
-    }
-    else if (req->command == Protocol::CMD_SPI_READ)
-    {
-        result = readReg(addr);
-    }
-    else
-    {
-        status = 0; // ошибка
+    switch (req->command) {
+    case Protocol::CMD_SPI_WRITE:
+        writeReg(req->ic_addr, req->data_request);
+        break;
+    case Protocol::CMD_SPI_READ:
+        result = readReg(req->ic_addr);
+        break;
+    default:
+        status = 0;
+        qDebug() << "Ошибка выполнения команды";
+        break;
     }
 
     // Формируем ответ
