@@ -1,36 +1,25 @@
 #include "tcp_server.h"
 #include "protocol.h"
 
-#include <QDebug>
-#include <cstring>
-
 // Конструктор TcpServer
-TcpServer::TcpServer(QObject *parent) : QObject(parent),
-                                server(new QTcpServer(this)),
-                                socket(nullptr)
+TcpServer::TcpServer(Parser *parser, int port, QObject *parent) : QObject(parent),
+                                server(new QTcpServer(this))
 {
+    connect(this, &TcpServer::dataReceived,  parser, &Parser::process);
+    connect(parser, &Parser::responseReady, this, &TcpServer::sendData);
+
     connect(server, &QTcpServer::newConnection,
             this, &TcpServer::onNewConnection);
+
+    if (!server->listen(QHostAddress::Any, port)) {
+        qDebug() << "Не удалось запустить сервер по данному адресу";
+    }
+
+    qDebug() << "Сервер запущен, порт: " << port;
 }
 
 // Деструктор TcpServer
 TcpServer::~TcpServer()
-{
-    stop();
-}
-
-bool TcpServer::start(int port)
-{
-    if (!server->listen(QHostAddress::Any, port)) {
-        qDebug() << "Не удалось запустить сервер по данному адресу";
-        return false;
-    }
-
-    qDebug() << "Сервер запущен, порт: " << port;
-    return true;
-}
-
-void TcpServer::stop()
 {
     if (socket) {
         socket->disconnectFromHost();
@@ -55,18 +44,12 @@ void TcpServer::onNewConnection()
     buffer.clear();
 
     qDebug() << "Клиент успешно подключен";
-    emit clientConnected();
 }
 
 // Отключение Клиента
 void TcpServer::onDisconnected()
 {
     qDebug() << "Клиент отключился";
-
-    socket->deleteLater();
-    socket = nullptr;
-
-    emit clientDisconnected();
 }
 
 // Чтение данных
@@ -77,43 +60,36 @@ void TcpServer::onReadyRead()
     while (true)
     {
         // Проверка на размер пакета
-        if (buffer.size() < static_cast<int>(Protocol::HEADER_SIZE))
+        if (buffer.size() < Protocol::HEADER_SIZE)
             return;
 
-        // Копируем данные в header
-        Protocol::Header header;
-        std::memcpy(&header, buffer.constData(), sizeof(header));
+        // Преобразуем байты в структуру заголовка
+        const Protocol::Header* header = reinterpret_cast<const Protocol::Header*>(buffer.constData());
 
         // Проверка MAGIC
-        if (header.magic != Protocol::MAGIC)
+        if (header->magic != Protocol::MAGIC)
         {
             qDebug() << "Некорректное начало пакета";
             buffer.clear();
             return;
         }
 
-        int fullSize = sizeof(Protocol::Header) + sizeof(Protocol::SpiRequest);
+        int fullSize = sizeof(Protocol::SpiRequest);
 
         // Ждём полный пакет
         if (buffer.size() < fullSize)
             return;
 
-        // Вырезаем полный пакет
-        QByteArray packet = buffer.left(fullSize);
-
         // Отправляем дальше в parser
-        emit dataReceived(packet);
+        emit dataReceived(buffer);
 
         // Очищаем буфер
-        buffer.clear();
+        buffer.remove(0, fullSize);
     }
 }
 
 // Отправляем данные Клиенту
 void TcpServer::sendData(const QByteArray &data)
 {
-    if (socket)
-    {
         socket->write(data);
-    }
 }
