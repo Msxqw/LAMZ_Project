@@ -16,19 +16,38 @@
 #include <QJsonDocument>
 #include <QByteArray>
 #include <QComboBox>
+#include <cstdint>
 
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
 
 public:
-    MainWindow(QWidget *parent = nullptr);
-    ~MainWindow();
+    explicit MainWindow(QWidget *parent = nullptr);
+    ~MainWindow() override;
+
+private:
+    enum Column {
+        ColumnId = 0,
+        ColumnWr,
+        ColumnAddr,
+        ColumnData,
+        ColumnStatus,
+        ColumnCount
+    };
+
+    struct CommandData {
+        uint8_t command = 0;
+        uint8_t messageId = 0;
+        uint8_t flags = 0;
+        uint8_t slaveId = 0;
+        uint8_t icAddr = 0;
+        uint32_t dataRequest = 0;
+    };
 
 private slots:
     void onConnectClicked();
     void onDisconnectClicked();
-    void onPingClicked();
     void onConnected();
     void onDisconnected();
     void onSocketError(QAbstractSocket::SocketError);
@@ -45,35 +64,27 @@ private slots:
 private:
     void setupUi();
     void setupConnections();
-    QByteArray createCommand(uint8_t command,
-                             uint8_t messageId,
-                             uint8_t flags,
-                             uint8_t slave_id,
-                             uint8_t ic_addr,
-                             uint32_t data_request);
+    QByteArray createCommand(const CommandData &cmd);
 
-    //Поля интерфейса
-    QTabWidget *tabWidget;
-    QWidget *connectTab;
-    QLineEdit *ipLineEdit;
-    QLineEdit *portLineEdit;
-    QPushButton *connectButton;
-    QPushButton *disconnectButton;
-    QPushButton *pingButton;
-    QLabel *statusLabel;
-    QTextEdit *logTextEdit;
-    QTcpSocket *socket;
-    bool isConnected;
+    QTabWidget *tabWidget = nullptr;
+    QWidget *connectTab = nullptr;
+    QLineEdit *ipLineEdit = nullptr;
+    QLineEdit *portLineEdit = nullptr;
+    QPushButton *connectButton = nullptr;
+    QPushButton *disconnectButton = nullptr;
+    QLabel *statusLabel = nullptr;
+    QTextEdit *logTextEdit = nullptr;
+    QTcpSocket *socket = nullptr;
+    bool isConnected = false;
     QByteArray buffer;
 
-    //Поля таблицы ЦАП
-    QWidget *dapTab;
-    QTableWidget *icTable;
-    QPushButton *addRowBtn;
-    QPushButton *delRowBtn;
-    QPushButton *sendBtn;
-    QPushButton *saveBtn;
-    QPushButton *loadBtn;
+    QWidget *dapTab = nullptr;
+    QTableWidget *icTable = nullptr;
+    QPushButton *addRowBtn = nullptr;
+    QPushButton *delRowBtn = nullptr;
+    QPushButton *sendBtn = nullptr;
+    QPushButton *saveBtn = nullptr;
+    QPushButton *loadBtn = nullptr;
 };
 
-#endif
+#endif // MAINWINDOW_H
