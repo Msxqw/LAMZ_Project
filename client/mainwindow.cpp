@@ -41,7 +41,7 @@ void MainWindow::setupUi()
 
     QVBoxLayout *connectLayout = new QVBoxLayout(connectTab);
 
-    ipLineEdit = new QLineEdit("192.168.100.9");
+    ipLineEdit = new QLineEdit("127.0.0.1");
     portLineEdit = new QLineEdit("12345");
 
     connectButton = new QPushButton("Подключиться");

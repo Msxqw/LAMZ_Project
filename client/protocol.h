@@ -6,7 +6,7 @@
 
 namespace Protocol {
 
-constexpr uint32_t MAGIC = 0x53504950;
+constexpr uint32_t MAGIC = 0x50495053;
 
 enum Command : uint8_t
 {
