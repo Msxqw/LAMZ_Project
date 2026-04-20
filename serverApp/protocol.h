@@ -5,7 +5,32 @@
 
 namespace Protocol {
 
-    constexpr uint32_t MAGIC = 0x53504950;
+    constexpr uint32_t MAGIC = 0x50495053;
+
+    enum Status : uint8_t
+    {
+        STATUS_OK = 0x00,
+        STATUS_UNKNOWN_COMMAND = 0x01,
+        STATUS_INVALID_PACKET = 0x02,
+        STATUS_GLOBAL_ERROR = 0x03
+    };
+
+    inline const char* statusToString(uint8_t status)
+    {
+        switch (status) {
+        case STATUS_OK:
+            return "OKAY";
+
+        case STATUS_UNKNOWN_COMMAND:
+            return "НЕИЗВЕСТНАЯ КОМАНДА";
+
+        case STATUS_INVALID_PACKET:
+            return "НЕКОРРЕКТНЫЙ ПАКЕТ";
+
+        default:
+            return "НЕИЗВЕСТНЫЙ СТАТУС";
+        }
+    }
 
     /*Команды (на запись/чтение)*/
     enum Command : uint8_t
