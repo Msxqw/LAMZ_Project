@@ -16,6 +16,7 @@
 #include <QJsonDocument>
 #include <QByteArray>
 #include <QComboBox>
+#include <QSpinBox>
 #include <cstdint>
 
 class MainWindow : public QMainWindow
@@ -28,12 +29,12 @@ public:
 
 private:
     enum Column {
-        ColumnId = 0,
-        ColumnWr,
-        ColumnAddr,
-        ColumnData,
-        ColumnStatus,
-        ColumnCount
+        COLUMN_ID = 0,
+        COLUMN_WR,
+        COLUMN_ADDR,
+        COLUMN_DATA,
+        COLUMN_STATUS,
+        COLUMN_COUNT
     };
 
     struct CommandData {
@@ -50,13 +51,13 @@ private slots:
     void onDisconnectClicked();
     void onConnected();
     void onDisconnected();
-    void onSocketError(QAbstractSocket::SocketError);
     void onReadyRead();
     void onAddRow();
     void onDelRow();
     void onSend();
     void onSave();
     void onLoad();
+    void onApplyStrobe();
 
     void updateRowDataEditable(int row);
     void logMessage(QString msg);
@@ -85,6 +86,10 @@ private:
     QPushButton *sendBtn = nullptr;
     QPushButton *saveBtn = nullptr;
     QPushButton *loadBtn = nullptr;
+
+    QSpinBox *periodSpinBox = nullptr;
+    QSpinBox *pulseSpinBox = nullptr;
+    QPushButton *applyStrobeButton = nullptr;
 };
 
 #endif // MAINWINDOW_H

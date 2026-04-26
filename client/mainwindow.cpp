@@ -42,6 +42,7 @@ void MainWindow::setupUi()
     QVBoxLayout *connectLayout = new QVBoxLayout(connectTab);
 
     ipLineEdit = new QLineEdit("127.0.0.1");
+    qDebug() << "IP line edit text:" << ipLineEdit->text();
     portLineEdit = new QLineEdit("12345");
 
     connectButton = new QPushButton("Подключиться");
@@ -71,7 +72,7 @@ void MainWindow::setupUi()
 
     QVBoxLayout *dapLayout = new QVBoxLayout(dapTab);
 
-    icTable = new QTableWidget(0, ColumnCount);
+    icTable = new QTableWidget(0, COLUMN_COUNT);
     QStringList headers;
     headers << "IC ID" << "W/R" << "IC_ADDR" << "DATA" << "STATUS";
     icTable->setHorizontalHeaderLabels(headers);
@@ -105,7 +106,50 @@ void MainWindow::setupUi()
     dapLayout->addLayout(tableBtns);
     dapLayout->addLayout(cmdBtns);
 
+    // ВКЛАДКА: ПРОВЕРКА УЗЛА СТРОБИРОВАНИЯ
+    QWidget *strobeTab = new QWidget();
+    tabWidget->addTab(strobeTab, "Проверка узла стробирования");
+
+    QVBoxLayout *strobeLayout = new QVBoxLayout(strobeTab);
+
+    // Частота дискретизации (фиксированная, без редактирования)
+    QLabel *freqLabel = new QLabel("Частота дискретизации, МГц: 500");
+    freqLabel->setStyleSheet("font-weight: bold;");
+    strobeLayout->addWidget(freqLabel);
+
+
+    // Период следования импульсов, мкс
+    QLabel *periodLabel = new QLabel("Период следования импульсов, мкс:");
+    strobeLayout->addWidget(periodLabel);
+
+    periodSpinBox = new QSpinBox();
+    periodSpinBox->setRange(1, 1000000);   // от 1 мкс до 1000 мс
+    periodSpinBox->setSingleStep(1);       // шаг +1/-1
+    periodSpinBox->setValue(100);          // по умолчанию 100 мкс
+    periodSpinBox->setSuffix(" мкс");
+    strobeLayout->addWidget(periodSpinBox);
+
+    // Длительность импульса, мс
+    QLabel *pulseLabel = new QLabel("Длительность импульса стробирования, мс:");
+    strobeLayout->addWidget(pulseLabel);
+
+    pulseSpinBox = new QSpinBox();
+    pulseSpinBox->setRange(1, 10000);      // от 1 мс до 10 секунд
+    pulseSpinBox->setSingleStep(1);        // шаг +1/-1
+    pulseSpinBox->setValue(10);            // по умолчанию 10 мс
+    pulseSpinBox->setSuffix(" мс");
+    strobeLayout->addWidget(pulseSpinBox);
+
+    // Кнопка для применения параметров
+    applyStrobeButton = new QPushButton("Применить параметры стробирования");
+    strobeLayout->addWidget(applyStrobeButton);
+
+    // Пространство внизу
+    strobeLayout->addStretch();
+
     tabWidget->addTab(new QWidget(), "Результаты");
+
+
 }
 
 void MainWindow::setupConnections()
@@ -116,13 +160,16 @@ void MainWindow::setupConnections()
     QObject::connect(socket, &QTcpSocket::connected, this, &MainWindow::onConnected);
     QObject::connect(socket, &QTcpSocket::disconnected, this, &MainWindow::onDisconnected);
     QObject::connect(socket, &QTcpSocket::readyRead, this, &MainWindow::onReadyRead);
-    QObject::connect(socket, &QTcpSocket::errorOccurred, this, &MainWindow::onSocketError);
+    QObject::connect(socket, &QTcpSocket::errorOccurred, this, [this](QAbstractSocket::SocketError) {
+        logMessage("Ошибка сокета: " + socket->errorString());
+    });
 
     QObject::connect(addRowBtn, &QPushButton::clicked, this, &MainWindow::onAddRow);
     QObject::connect(delRowBtn, &QPushButton::clicked, this, &MainWindow::onDelRow);
     QObject::connect(sendBtn, &QPushButton::clicked, this, &MainWindow::onSend);
     QObject::connect(saveBtn, &QPushButton::clicked, this, &MainWindow::onSave);
     QObject::connect(loadBtn, &QPushButton::clicked, this, &MainWindow::onLoad);
+    QObject::connect(applyStrobeButton, &QPushButton::clicked, this, &MainWindow::onApplyStrobe);
 }
 
 void MainWindow::updateRowDataEditable(int row)
@@ -131,7 +178,7 @@ void MainWindow::updateRowDataEditable(int row)
         return;
     }
 
-    QWidget *wrWidget = icTable->cellWidget(row, ColumnWr);
+    QWidget *wrWidget = icTable->cellWidget(row, COLUMN_WR);
     if (wrWidget == nullptr) {
         return;
     }
@@ -141,10 +188,9 @@ void MainWindow::updateRowDataEditable(int row)
         return;
     }
 
-    QTableWidgetItem *dataItem = icTable->item(row, ColumnData);
-    if (dataItem == nullptr) {
-        return;
-    }
+    QTableWidgetItem *dataItem = icTable->item(row, COLUMN_DATA);
+    if (!dataItem) return;
+
 
     if (wrCombo->currentText() == "R") {
         dataItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
@@ -191,17 +237,13 @@ void MainWindow::onDisconnected()
     logMessage("Соединение закрыто");
 }
 
-void MainWindow::onSocketError(QAbstractSocket::SocketError)
-{
-    logMessage("Ошибка сокета: " + socket->errorString());
-}
 
 void MainWindow::onReadyRead()
 {
     buffer.append(socket->readAll());
 
     while (true) {
-        if (buffer.size() < Protocol::HEADER_SIZE) {
+        if (buffer.size() < static_cast<int>(Protocol::HEADER_SIZE)) {
             break;
         }
 
@@ -219,30 +261,69 @@ void MainWindow::onReadyRead()
             break;
         }
 
-        if (hdr.command == Protocol::CMD_SPI_WRITE || hdr.command == Protocol::CMD_SPI_READ) {
+        // 1. ЦАП‑тесты (CMD_SPI_WRITE / CMD_SPI_READ)
+        if (hdr.command == Protocol::CMD_SPI_WRITE ||
+            hdr.command == Protocol::CMD_SPI_READ)
+        {
             if (hdr.flags == Protocol::FLAG_RESPONSE) {
                 Protocol::SpiResponse resp;
                 std::memcpy(&resp, buffer.constData(), sizeof(resp));
 
-                logMessage(QString("Ответ: msgId=%1 status=%2 data=0x%3")
+                const char* statusStr = Protocol::statusToString(resp.status);
+                logMessage(QString("Ответ (SPI): msgId=%1 status=%2 data=0x%3")
                                .arg(resp.messageId)
-                               .arg(resp.status)
+                               .arg(statusStr)
                                .arg(resp.data_responce, 8, 16, QChar('0')));
 
                 int row = resp.messageId;
                 if (row >= 0 && row < icTable->rowCount()) {
-                    if (resp.status == 0) {
-                        icTable->setItem(row, ColumnStatus, new QTableWidgetItem("OK"));
-                        if (hdr.command == Protocol::CMD_SPI_READ) {
-                            QString dataHex = QString("0x%1").arg(resp.data_responce, 8, 16, QChar('0'));
-                            icTable->setItem(row, ColumnData, new QTableWidgetItem(dataHex));
-                        }
-                    } else {
-                        icTable->setItem(row, ColumnStatus, new QTableWidgetItem(QString("ERR %1").arg(resp.status)));
+                    icTable->setItem(row, COLUMN_STATUS, new QTableWidgetItem(statusStr));
+
+                    if (hdr.command == Protocol::CMD_SPI_READ) {
+                        QString dataHex = QString("0x%1").arg(resp.data_responce, 8, 16, QChar('0'));
+                        icTable->setItem(row, COLUMN_DATA, new QTableWidgetItem(dataHex));
                     }
                 }
             } else if (hdr.flags == Protocol::FLAG_ERROR) {
-                logMessage("Ошибка сервера (флаг ERROR)");
+                logMessage("Ошибка сервера (флаг ERROR) [SPI]");
+            }
+        }
+
+        // 2. СТРОБ‑команды (проверка узла стробирования)
+        else if (hdr.command == Protocol::CMD_STROBE_PERIOD ||
+                 hdr.command == Protocol::CMD_STROBE_PULSE)
+        {
+            if (hdr.flags == Protocol::FLAG_RESPONSE) {
+                Protocol::StrobeResponse resp;
+                std::memcpy(&resp, buffer.constData(), sizeof(resp));
+
+                const char* statusStr = Protocol::statusToString(resp.status);
+                logMessage(QString("Ответ (строб): cmd=%1, msgId=%2, status=%3, value=%4")
+                               .arg(hdr.command, 2, 16, QChar('0'))
+                               .arg(resp.messageId)
+                               .arg(statusStr)
+                               .arg(resp.value));
+
+                // ------ ПРОСТО ВОТ ЭТА ЧАСТЬ ----- //
+                if (resp.status == 0) {
+                    QMessageBox::information(
+                        this,
+                        "Проверка узла стробирования",
+                        "Параметры стробирования успешно применились.");
+                } else {
+                    QString msg = QString("Проверка не прошла:\n%1").arg(statusStr);
+                    QMessageBox::warning(
+                        this,
+                        "Проверка узла стробирования",
+                        msg);
+                }
+                // ------ ПРОСТО ВОТ ЭТА ЧАСТЬ ----- //
+            } else if (hdr.flags == Protocol::FLAG_ERROR) {
+                logMessage("Ошибка сервера (флаг ERROR) [STROBE]");
+                QMessageBox::warning(
+                    this,
+                    "Проверка узла стробирования",
+                    "Сервер вернул флаг ERROR при обработке строб‑команды.");
             }
         }
 
@@ -260,7 +341,7 @@ void MainWindow::onAddRow()
     idCombo->addItem("2");
     idCombo->addItem("3");
     idCombo->setCurrentIndex(0);
-    icTable->setCellWidget(row, ColumnId, idCombo);
+    icTable->setCellWidget(row, COLUMN_ID, idCombo);
 
     QComboBox *wrCombo = new QComboBox();
     wrCombo->addItem("W");
@@ -269,17 +350,17 @@ void MainWindow::onAddRow()
     QObject::connect(wrCombo, &QComboBox::currentIndexChanged, this, [this, row](int) {
         updateRowDataEditable(row);
     });
-    icTable->setCellWidget(row, ColumnWr, wrCombo);
+    icTable->setCellWidget(row, COLUMN_WR, wrCombo);
 
     QTableWidgetItem *addrItem = new QTableWidgetItem();
-    icTable->setItem(row, ColumnAddr, addrItem);
+    icTable->setItem(row, COLUMN_ADDR, addrItem);
 
     QTableWidgetItem *dataItem = new QTableWidgetItem();
-    icTable->setItem(row, ColumnData, dataItem);
+    icTable->setItem(row, COLUMN_DATA, dataItem);
 
     QTableWidgetItem *statusItem = new QTableWidgetItem();
     statusItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
-    icTable->setItem(row, ColumnStatus, statusItem);
+    icTable->setItem(row, COLUMN_STATUS, statusItem);
 
     updateRowDataEditable(row);
     logMessage("Добавлена пустая строка #" + QString::number(row + 1));
@@ -306,7 +387,21 @@ QByteArray MainWindow::createCommand(const CommandData &cmd)
     req.ic_addr = cmd.icAddr;
     req.data_request = cmd.dataRequest;
 
-    return QByteArray(reinterpret_cast<const char*>(&req), sizeof(Protocol::SpiRequest));
+    QByteArray packet(reinterpret_cast<const char*>(&req), sizeof(Protocol::SpiRequest));
+
+    logMessage(QString("Отправляю пакет %1 байт: magic=0x%2, cmd=0x%3, msgId=%4, flags=%5, "
+                       "payloadSize=%6, slaveId=%7, icAddr=%8, data=0x%9")
+                   .arg(packet.size())
+                   .arg(req.magic, 8, 16, QChar('0'))
+                   .arg(req.command, 2, 16, QChar('0'))
+                   .arg(req.messageId)
+                   .arg(req.flags, 2, 16, QChar('0'))
+                   .arg(req.payloadSize)
+                   .arg(req.slave_id)
+                   .arg(req.ic_addr, 2, 16, QChar('0'))
+                   .arg(req.data_request, 8, 16, QChar('0')));
+
+    return packet;
 }
 
 void MainWindow::onSend()
@@ -317,7 +412,7 @@ void MainWindow::onSend()
     }
 
     for (int row = 0; row < icTable->rowCount(); row++) {
-        QWidget *idWidget = icTable->cellWidget(row, ColumnId);
+        QWidget *idWidget = icTable->cellWidget(row, COLUMN_ID);
         if (idWidget == nullptr) {
             continue;
         }
@@ -329,11 +424,11 @@ void MainWindow::onSend()
         bool ok = false;
         uint8_t slaveId = static_cast<uint8_t>(idCombo->currentText().toUInt(&ok));
         if (!ok) {
-            icTable->setItem(row, ColumnStatus, new QTableWidgetItem("BAD IC ID"));
+            icTable->setItem(row, COLUMN_STATUS, new QTableWidgetItem("BAD IC ID"));
             continue;
         }
 
-        QWidget *wrWidget = icTable->cellWidget(row, ColumnWr);
+        QWidget *wrWidget = icTable->cellWidget(row, COLUMN_WR);
         if (wrWidget == nullptr) {
             continue;
         }
@@ -351,45 +446,46 @@ void MainWindow::onSend()
 
         uint8_t flags = Protocol::FLAG_REQUEST;
 
-        QTableWidgetItem *addrItem = icTable->item(row, ColumnAddr);
+        QTableWidgetItem *addrItem = icTable->item(row, COLUMN_ADDR);
         if (addrItem == nullptr) {
-            icTable->setItem(row, ColumnStatus, new QTableWidgetItem("BAD IC ADDR"));
+            icTable->setItem(row, COLUMN_STATUS, new QTableWidgetItem("BAD IC ADDR"));
             continue;
         }
 
         uint32_t addrVal = addrItem->text().trimmed().toUInt(&ok, 16);
         if (!ok) {
-            icTable->setItem(row, ColumnStatus, new QTableWidgetItem("BAD IC ADDR"));
+            icTable->setItem(row, COLUMN_STATUS, new QTableWidgetItem("BAD IC ADDR"));
             continue;
         }
         uint8_t icAddr = static_cast<uint8_t>(addrVal & 0xFF);
 
         uint32_t dataVal = 0;
         if (wrCombo->currentText() == "W") {
-            QTableWidgetItem *dataItem = icTable->item(row, ColumnData);
+            QTableWidgetItem *dataItem = icTable->item(row, COLUMN_DATA);
             if (dataItem == nullptr) {
-                icTable->setItem(row, ColumnStatus, new QTableWidgetItem("BAD DATA WR"));
+                icTable->setItem(row, COLUMN_STATUS, new QTableWidgetItem("BAD DATA WR"));
                 continue;
             }
 
             dataVal = dataItem->text().trimmed().toUInt(&ok, 16);
             if (!ok) {
-                icTable->setItem(row, ColumnStatus, new QTableWidgetItem("BAD DATA WR"));
+                icTable->setItem(row, COLUMN_STATUS, new QTableWidgetItem("BAD DATA WR"));
                 continue;
             }
         }
 
-        CommandData cmd;
-        cmd.command = command;
-        cmd.messageId = static_cast<uint8_t>(row);
-        cmd.flags = flags;
-        cmd.slaveId = slaveId;
-        cmd.icAddr = icAddr;
-        cmd.dataRequest = dataVal;
+        CommandData cmd{
+            command,
+            static_cast<uint8_t>(row),
+            flags,
+            slaveId,
+            icAddr,
+            dataVal
+        };
 
         QByteArray packet = createCommand(cmd);
         socket->write(packet);
-        icTable->setItem(row, ColumnStatus, new QTableWidgetItem("SENT"));
+        icTable->setItem(row, COLUMN_STATUS, new QTableWidgetItem("SENT"));
     }
 }
 
@@ -406,20 +502,20 @@ void MainWindow::onSave()
         for (int i = 0; i < icTable->rowCount(); i++) {
             QJsonObject obj;
 
-            QComboBox *idCombo = qobject_cast<QComboBox*>(icTable->cellWidget(i, ColumnId));
+            QComboBox *idCombo = qobject_cast<QComboBox*>(icTable->cellWidget(i, COLUMN_ID));
             obj["id"] = idCombo ? idCombo->currentText() : "";
 
-            QComboBox *wrCombo = qobject_cast<QComboBox*>(icTable->cellWidget(i, ColumnWr));
+            QComboBox *wrCombo = qobject_cast<QComboBox*>(icTable->cellWidget(i, COLUMN_WR));
             obj["wr"] = wrCombo ? wrCombo->currentText() : "";
 
-            QTableWidgetItem *addrItem = icTable->item(i, ColumnAddr);
+            QTableWidgetItem *addrItem = icTable->item(i, COLUMN_ADDR);
             if (addrItem != nullptr) {
                 obj["addr"] = addrItem->text();
             } else {
                 obj["addr"] = "";
             }
 
-            QTableWidgetItem *dataItem = icTable->item(i, ColumnData);
+            QTableWidgetItem *dataItem = icTable->item(i, COLUMN_DATA);
             if (dataItem != nullptr) {
                 obj["data"] = dataItem->text();
             } else {
@@ -459,26 +555,25 @@ void MainWindow::onLoad()
             idCombo->addItem("2");
             idCombo->addItem("3");
             idCombo->setCurrentText(obj["id"].toString());
-            icTable->setCellWidget(row, ColumnId, idCombo);
+            icTable->setCellWidget(row, COLUMN_ID, idCombo);
 
             QComboBox *wrCombo = new QComboBox();
-            wrCombo->addItem("W");
-            wrCombo->addItem("R");
+            wrCombo->addItems({"W", "R"});
             wrCombo->setCurrentText(obj["wr"].toString());
             QObject::connect(wrCombo, &QComboBox::currentIndexChanged, this, [this, row](int) {
                 updateRowDataEditable(row);
             });
-            icTable->setCellWidget(row, ColumnWr, wrCombo);
+            icTable->setCellWidget(row, COLUMN_WR, wrCombo);
 
             QTableWidgetItem *addrItem = new QTableWidgetItem(obj["addr"].toString());
-            icTable->setItem(row, ColumnAddr, addrItem);
+            icTable->setItem(row, COLUMN_ADDR, addrItem);
 
             QTableWidgetItem *dataItem = new QTableWidgetItem(obj["data"].toString());
-            icTable->setItem(row, ColumnData, dataItem);
+            icTable->setItem(row, COLUMN_DATA, dataItem);
 
             QTableWidgetItem *statusItem = new QTableWidgetItem();
             statusItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
-            icTable->setItem(row, ColumnStatus, statusItem);
+            icTable->setItem(row, COLUMN_STATUS, statusItem);
 
             updateRowDataEditable(row);
         }
@@ -487,3 +582,46 @@ void MainWindow::onLoad()
         f.close();
     }
 }
+
+void MainWindow::onApplyStrobe()
+{
+    int periodUs = periodSpinBox->value();   // период следования импульсов, мкс
+    int pulseMs  = pulseSpinBox->value();    // длительность импульса, мс
+
+    if (!isConnected) {
+        QMessageBox::warning(this, "Ошибка", "Сначала подключись к серверу!");
+        return;
+    }
+
+    logMessage(QString("Проверка узла стробирования: период = %1 мкс, длительность = %2 мс")
+                   .arg(periodUs).arg(pulseMs));
+
+    // 1) Команда: период строба
+    Protocol::StrobeRequest req1;
+    req1.magic = Protocol::MAGIC;
+    req1.command = Protocol::CMD_STROBE_PERIOD;
+    req1.messageId = 0;
+    req1.flags = Protocol::FLAG_REQUEST;
+    req1.payloadSize = sizeof(Protocol::StrobeRequest) - Protocol::HEADER_SIZE;
+    req1.value = static_cast<uint32_t>(periodUs);
+
+    QByteArray packet1(reinterpret_cast<const char*>(&req1), sizeof(Protocol::StrobeRequest));
+    socket->write(packet1);
+
+    logMessage(QString("Отправлен CMD_STROBE_PERIOD: %1 мкс").arg(req1.value));
+
+    // 2) Команда: длительность импульса
+    Protocol::StrobeRequest req2;
+    req2.magic = Protocol::MAGIC;
+    req2.command = Protocol::CMD_STROBE_PULSE;
+    req2.messageId = 1;
+    req2.flags = Protocol::FLAG_REQUEST;
+    req2.payloadSize = sizeof(Protocol::StrobeRequest) - Protocol::HEADER_SIZE;
+    req2.value = static_cast<uint32_t>(pulseMs);
+
+    QByteArray packet2(reinterpret_cast<const char*>(&req2), sizeof(Protocol::StrobeRequest));
+    socket->write(packet2);
+
+    logMessage(QString("Отправлен CMD_STROBE_PULSE: %1 мс").arg(req2.value));
+}
+

@@ -1,4 +1,3 @@
-// protocol.h
 #ifndef PROTOCOL_H
 #define PROTOCOL_H
 
@@ -8,10 +7,38 @@ namespace Protocol {
 
 constexpr uint32_t MAGIC = 0x50495053;
 
+enum Status : uint8_t
+{
+    STATUS_OK = 0x00,
+    STATUS_UNKNOWN_COMMAND = 0x01,
+    STATUS_INVALID_PACKET = 0x02,
+    STATUS_GLOBAL_ERROR = 0x03
+};
+
+inline const char* statusToString(uint8_t status)
+{
+    switch (status) {
+    case STATUS_OK:
+        return "OKAY";
+
+    case STATUS_UNKNOWN_COMMAND:
+        return "НЕИЗВЕСТНАЯ КОМАНДА";
+
+    case STATUS_INVALID_PACKET:
+        return "НЕКОРРЕКТНЫЙ ПАКЕТ";
+
+    default:
+        return "НЕИЗВЕСТНЫЙ СТАТУС";
+    }
+}
+
 enum Command : uint8_t
 {
     CMD_SPI_WRITE = 0x00,
-    CMD_SPI_READ  = 0x01
+    CMD_SPI_READ  = 0x01,
+    CMD_CHECK_STROBE = 0x10,
+    CMD_STROBE_PERIOD = 0x11,
+    CMD_STROBE_PULSE = 0x12
 };
 
 enum Flags : uint8_t
@@ -25,9 +52,9 @@ enum Flags : uint8_t
 struct Header
 {
     uint32_t magic;
-    uint8_t command;
-    uint8_t messageId;
-    uint8_t flags;
+    uint8_t  command;
+    uint8_t  messageId;
+    uint8_t  flags;
     uint32_t payloadSize;
 };
 #pragma pack(pop)
@@ -37,15 +64,28 @@ constexpr std::size_t HEADER_SIZE = sizeof(Header);
 #pragma pack(push, 1)
 struct SpiRequest : public Header
 {
-    uint8_t slave_id;
-    uint8_t ic_addr;
-    uint32_t data_request;
+    uint8_t slave_id;           // идентификатор slave (AD, HMC, LMK)
+    uint8_t ic_addr;            // адрес обращения регистра slave (адрес на самой микросхеме)
+    uint32_t data_request;      // данные (если запрос на чтение, то отправляем пустоту)
 };
 
 struct SpiResponse : public Header
 {
     uint8_t  status;
     uint32_t data_responce;
+};
+#pragma pack(pop)
+
+#pragma pack(push, 1)
+struct StrobeRequest : public Header
+{
+    uint32_t value;   // период (мкс) или длительность (мс)
+};
+
+struct StrobeResponse : public Header
+{
+    uint8_t  status;
+    uint32_t value;   // подтверждённое / применённое значение
 };
 #pragma pack(pop)
 
