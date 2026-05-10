@@ -67,6 +67,45 @@ void MainWindow::setupUi()
     connectLayout->addWidget(new QLabel("Лог:"));
     connectLayout->addWidget(logTextEdit);
 
+    // Проверка флеш-памяти
+    eepromTab = new QWidget();
+    tabWidget->addTab(eepromTab, "Проверка EEPROM");
+
+    QVBoxLayout *eepromMainLayout = new QVBoxLayout(eepromTab);
+
+    QHBoxLayout *eepromTopLayout = new QHBoxLayout();
+
+    QLabel *eepromAddressLabel = new QLabel("Адрес:");
+    eepromAddressSpinBox = new QSpinBox();
+    eepromAddressSpinBox->setRange(0, 65535);
+    eepromAddressSpinBox->setValue(0);
+
+    QLabel *eepromSizeLabel = new QLabel("Размер блока:");
+    eepromSizeComboBox = new QComboBox();
+    eepromSizeComboBox->addItem("128 байт");
+    eepromSizeComboBox->addItem("256 байт");
+    eepromSizeComboBox->addItem("512 байт");
+
+    eepromTopLayout->addWidget(eepromAddressLabel);
+    eepromTopLayout->addWidget(eepromAddressSpinBox);
+    eepromTopLayout->addWidget(eepromSizeLabel);
+    eepromTopLayout->addWidget(eepromSizeComboBox);
+
+    QHBoxLayout *eepromButtonsLayout = new QHBoxLayout();
+
+    eepromWriteButton = new QPushButton("Записать");
+    eepromReadButton = new QPushButton("Прочитать и сравнить");
+
+    eepromButtonsLayout->addWidget(eepromWriteButton);
+    eepromButtonsLayout->addWidget(eepromReadButton);
+
+    eepromStatusLabel = new QLabel("Статус: ожидание");
+
+    eepromMainLayout->addLayout(eepromTopLayout);
+    eepromMainLayout->addLayout(eepromButtonsLayout);
+    eepromMainLayout->addWidget(eepromStatusLabel);
+    eepromMainLayout->addStretch();
+
     dapTab = new QWidget();
     tabWidget->addTab(dapTab, "ЦАП Тесты");
 
@@ -147,8 +186,48 @@ void MainWindow::setupUi()
     // Пространство внизу
     strobeLayout->addStretch();
 
-    tabWidget->addTab(new QWidget(), "Результаты");
+    syncTab = new QWidget();
+    tabWidget->addTab(syncTab, "Проверка узла синхронизации");
 
+    QVBoxLayout *syncLayout = new QVBoxLayout(syncTab);
+
+    QLabel *syncTitleLabel = new QLabel("Источник опорной частоты:");
+    syncTitleLabel->setStyleSheet("font-weight: bold;");
+    syncLayout->addWidget(syncTitleLabel);
+
+    internalSourceRadio = new QRadioButton("Внутренний генератор");
+    externalSourceRadio = new QRadioButton("Внешний источник");
+
+    internalSourceRadio->setChecked(true);
+
+    syncSourceGroup = new QButtonGroup(this);
+    syncSourceGroup->addButton(internalSourceRadio);
+    syncSourceGroup->addButton(externalSourceRadio);
+
+    syncLayout->addWidget(internalSourceRadio);
+    syncLayout->addWidget(externalSourceRadio);
+
+    QLabel *syncFreqLabel = new QLabel("Выходная частота, МГц:");
+    syncLayout->addWidget(syncFreqLabel);
+
+    syncFreqSpinBox = new QSpinBox();
+    syncFreqSpinBox->setRange(1, 1000);
+    syncFreqSpinBox->setValue(100);
+    syncFreqSpinBox->setSuffix(" МГц");
+    syncLayout->addWidget(syncFreqSpinBox);
+
+    syncHintLabel = new QLabel(
+        "При выборе внутреннего генератора задаётся выходная частота.\n"
+        "При выборе внешнего источника частота поступает извне."
+        );
+    syncHintLabel->setStyleSheet("color: #a6adc8;");
+    syncHintLabel->setWordWrap(true);
+    syncLayout->addWidget(syncHintLabel);
+
+    applySyncButton = new QPushButton("Применить параметры синхронизации");
+    syncLayout->addWidget(applySyncButton);
+
+    syncLayout->addStretch();
 
 }
 
@@ -170,6 +249,12 @@ void MainWindow::setupConnections()
     QObject::connect(saveBtn, &QPushButton::clicked, this, &MainWindow::onSave);
     QObject::connect(loadBtn, &QPushButton::clicked, this, &MainWindow::onLoad);
     QObject::connect(applyStrobeButton, &QPushButton::clicked, this, &MainWindow::onApplyStrobe);
+
+    QObject::connect(applySyncButton, &QPushButton::clicked, this, &MainWindow::onApplySync);
+    QObject::connect(internalSourceRadio, &QRadioButton::toggled, this, &MainWindow::onSyncSourceChanged);
+    QObject::connect(externalSourceRadio, &QRadioButton::toggled, this, &MainWindow::onSyncSourceChanged);
+    QObject::connect(eepromWriteButton, &QPushButton::clicked, this, &MainWindow::onEepromWriteClicked);
+    QObject::connect(eepromReadButton, &QPushButton::clicked, this, &MainWindow::onEepromReadClicked);
 }
 
 void MainWindow::updateRowDataEditable(int row)
@@ -305,7 +390,7 @@ void MainWindow::onReadyRead()
                                .arg(resp.value));
 
                 // ------ ПРОСТО ВОТ ЭТА ЧАСТЬ ----- //
-                if (resp.status == 0) {
+                if (resp.status == Protocol::STATUS_OK) {
                     QMessageBox::information(
                         this,
                         "Проверка узла стробирования",
@@ -327,8 +412,197 @@ void MainWindow::onReadyRead()
             }
         }
 
+        // 3. КОМАНДЫ СИНХРОНИЗАЦИИ
+        else if (hdr.command == Protocol::CMD_SYNC_SOURCE ||
+                 hdr.command == Protocol::CMD_SYNC_FREQUENCY)
+        {
+            if (hdr.flags == Protocol::FLAG_RESPONSE) {
+                Protocol::SyncResponse resp;
+                std::memcpy(&resp, buffer.constData(), sizeof(resp));
+
+                const char* statusStr = Protocol::statusToString(resp.status);
+                QString sourceStr = (resp.source == Protocol::SYNC_SOURCE_INTERNAL)
+                                        ? "внутренний генератор"
+                                        : "внешний источник";
+
+                logMessage(QString("Ответ (синхронизация): cmd=%1, msgId=%2, status=%3, source=%4, freq=%5 МГц")
+                               .arg(hdr.command, 2, 16, QChar('0'))
+                               .arg(resp.messageId)
+                               .arg(statusStr)
+                               .arg(sourceStr)
+                               .arg(resp.frequency));
+
+                if (resp.status == Protocol::STATUS_OK) {
+                    if (hdr.command == Protocol::CMD_SYNC_SOURCE) {
+                        QMessageBox::information(
+                            this,
+                            "Проверка узла синхронизации",
+                            QString("Источник опорной частоты успешно установлен: %1.")
+                                .arg(sourceStr));
+                    } else if (hdr.command == Protocol::CMD_SYNC_FREQUENCY) {
+                        QMessageBox::information(
+                            this,
+                            "Проверка узла синхронизации",
+                            QString("Выходная частота успешно установлена: %1 МГц.")
+                                .arg(resp.frequency));
+                    }
+                } else {
+                    QMessageBox::warning(
+                        this,
+                        "Проверка узла синхронизации",
+                        QString("Сервер вернул ошибку: %1").arg(statusStr));
+                }
+            } else if (hdr.flags == Protocol::FLAG_ERROR) {
+                logMessage("Ошибка сервера (флаг ERROR) [SYNC]");
+                QMessageBox::warning(
+                    this,
+                    "Проверка узла синхронизации",
+                    "Сервер вернул флаг ERROR при обработке команды синхронизации.");
+            }
+        }
+        // 4. КОМАНДЫ EEPROM
+        else if (hdr.command == Protocol::CMD_EEPROM_READ_128 ||
+                 hdr.command == Protocol::CMD_EEPROM_READ_256 ||
+                 hdr.command == Protocol::CMD_EEPROM_READ_512)
+        {
+            if (hdr.flags == Protocol::FLAG_RESPONSE) {
+                int dataSize = 0;
+                uint8_t responseStatus = Protocol::STATUS_OK;
+                quint32 responseAddress = 0;
+
+                eepromReadData.clear();
+
+                if (hdr.command == Protocol::CMD_EEPROM_READ_128) {
+                    Protocol::EepromRead128Response resp;
+                    std::memcpy(&resp, buffer.constData(), sizeof(resp));
+
+                    responseStatus = resp.status;
+                    responseAddress = resp.address;
+                    dataSize = 128;
+
+                    logMessage(QString("EEPROM: получен ответ чтения 128 байт, status=%1, address=%2")
+                                   .arg(Protocol::statusToString(resp.status))
+                                   .arg(resp.address));
+
+                    if (resp.status == Protocol::STATUS_OK) {
+                        for (int i = 0; i < 128; i++) {
+                            eepromReadData.append(static_cast<char>(resp.data[i]));
+                        }
+                    }
+                }
+                else if (hdr.command == Protocol::CMD_EEPROM_READ_256) {
+                    Protocol::EepromRead256Response resp;
+                    std::memcpy(&resp, buffer.constData(), sizeof(resp));
+
+                    responseStatus = resp.status;
+                    responseAddress = resp.address;
+                    dataSize = 256;
+
+                    logMessage(QString("EEPROM: получен ответ чтения 256 байт, status=%1, address=%2")
+                                   .arg(Protocol::statusToString(resp.status))
+                                   .arg(resp.address));
+
+                    if (resp.status == Protocol::STATUS_OK) {
+                        for (int i = 0; i < 256; i++) {
+                            eepromReadData.append(static_cast<char>(resp.data[i]));
+                        }
+                    }
+                }
+                else if (hdr.command == Protocol::CMD_EEPROM_READ_512) {
+                    Protocol::EepromRead512Response resp;
+                    std::memcpy(&resp, buffer.constData(), sizeof(resp));
+
+                    responseStatus = resp.status;
+                    responseAddress = resp.address;
+                    dataSize = 512;
+
+                    logMessage(QString("EEPROM: получен ответ чтения 512 байт, status=%1, address=%2")
+                                   .arg(Protocol::statusToString(resp.status))
+                                   .arg(resp.address));
+
+                    if (resp.status == Protocol::STATUS_OK) {
+                        for (int i = 0; i < 512; i++) {
+                            eepromReadData.append(static_cast<char>(resp.data[i]));
+                        }
+                    }
+                }
+
+                if (responseStatus != Protocol::STATUS_OK) {
+                    QString statusStr = Protocol::statusToString(responseStatus);
+
+                    logMessage(QString("EEPROM: ошибка чтения, status=%1, address=%2")
+                                   .arg(statusStr)
+                                   .arg(responseAddress));
+
+                    eepromStatusLabel->setText(QString("Статус: ошибка чтения (%1)").arg(statusStr));
+
+                    QMessageBox::warning(
+                        this,
+                        "Проверка EEPROM",
+                        QString("Сервер вернул ошибку чтения: %1").arg(statusStr));
+                }
+                else if (eepromWriteData.isEmpty()) {
+                    logMessage("EEPROM: нет записанных данных для сравнения");
+                    eepromStatusLabel->setText("Статус: нет данных для сравнения");
+
+                    QMessageBox::warning(
+                        this,
+                        "Проверка EEPROM",
+                        "Нет записанных данных для сравнения. Сначала выполните запись.");
+                }
+                else if (eepromReadData.size() != eepromWriteData.size()) {
+                    logMessage("EEPROM: размеры данных не совпадают");
+                    eepromStatusLabel->setText("Статус: ошибка размера данных");
+
+                    QMessageBox::warning(
+                        this,
+                        "Проверка EEPROM",
+                        "Размер прочитанных данных не совпадает с размером записанных.");
+                }
+                else {
+                    bool match = true;
+
+                    for (int i = 0; i < eepromReadData.size(); i++) {
+                        if (eepromReadData[i] != eepromWriteData[i]) {
+                            match = false;
+                            break;
+                        }
+                    }
+
+                    if (match) {
+                        logMessage("EEPROM: данные совпадают ✅");
+                        eepromStatusLabel->setText("Статус: данные совпадают ✅");
+
+                        QMessageBox::information(
+                            this,
+                            "Проверка EEPROM",
+                            QString("Проверка успешна!\nПрочитано %1 байт, все данные совпадают.")
+                                .arg(dataSize));
+                    } else {
+                        logMessage("EEPROM: данные НЕ совпадают ❌");
+                        eepromStatusLabel->setText("Статус: данные НЕ совпадают ❌");
+
+                        QMessageBox::warning(
+                            this,
+                            "Проверка EEPROM",
+                            "Ошибка! Прочитанные данные не совпадают с записанными.");
+                    }
+                }
+            } else if (hdr.flags == Protocol::FLAG_ERROR) {
+                logMessage("EEPROM: сервер вернул ERROR при чтении");
+                eepromStatusLabel->setText("Статус: ошибка сервера");
+
+                QMessageBox::warning(
+                    this,
+                    "Проверка EEPROM",
+                    "Сервер вернул флаг ERROR при обработке команды чтения EEPROM.");
+            }
+        }
+
         buffer.remove(0, fullSize);
+
     }
+
 }
 
 void MainWindow::onAddRow()
@@ -625,3 +899,211 @@ void MainWindow::onApplyStrobe()
     logMessage(QString("Отправлен CMD_STROBE_PULSE: %1 мс").arg(req2.value));
 }
 
+void MainWindow::onSyncSourceChanged()
+{
+    bool internalSelected = internalSourceRadio->isChecked();
+    syncFreqSpinBox->setEnabled(internalSelected);
+
+    if (internalSelected) {
+        syncHintLabel->setText(
+            "Выбран внутренний генератор.\n"
+            "Задайте выходную частоту в МГц."
+            );
+    } else {
+        syncHintLabel->setText(
+            "Выбран внешний источник.\n"
+            "Опорная частота подаётся на устройство извне."
+            );
+    }
+}
+
+void MainWindow::onApplySync()
+{
+    if (!isConnected) {
+        QMessageBox::warning(this, "Ошибка", "Сначала подключись к серверу!");
+        return;
+    }
+
+    uint8_t source = internalSourceRadio->isChecked()
+                         ? Protocol::SYNC_SOURCE_INTERNAL
+                         : Protocol::SYNC_SOURCE_EXTERNAL;
+
+    uint32_t freqMHz = static_cast<uint32_t>(syncFreqSpinBox->value());
+
+    logMessage(QString("Проверка узла синхронизации: источник = %1, частота = %2 МГц")
+                   .arg(source == Protocol::SYNC_SOURCE_INTERNAL ? "внутренний" : "внешний")
+                   .arg(freqMHz));
+
+    // 1) Команда: источник опорной частоты
+    Protocol::SyncRequest reqSource;
+    reqSource.magic = Protocol::MAGIC;
+    reqSource.command = Protocol::CMD_SYNC_SOURCE;
+    reqSource.messageId = 0;
+    reqSource.flags = Protocol::FLAG_REQUEST;
+    reqSource.payloadSize = sizeof(Protocol::SyncRequest) - Protocol::HEADER_SIZE;
+    reqSource.source = source;
+    reqSource.frequency = 0;
+
+    QByteArray packetSource(reinterpret_cast<const char*>(&reqSource), sizeof(Protocol::SyncRequest));
+    socket->write(packetSource);
+
+    logMessage(QString("Отправлен CMD_SYNC_SOURCE: %1")
+                   .arg(source == Protocol::SYNC_SOURCE_INTERNAL ? "внутренний генератор"
+                                                                 : "внешний источник"));
+
+    // 2) Если внутренний генератор — отдельно отправляем частоту
+    if (source == Protocol::SYNC_SOURCE_INTERNAL) {
+        Protocol::SyncRequest reqFreq;
+        reqFreq.magic = Protocol::MAGIC;
+        reqFreq.command = Protocol::CMD_SYNC_FREQUENCY;
+        reqFreq.messageId = 1;
+        reqFreq.flags = Protocol::FLAG_REQUEST;
+        reqFreq.payloadSize = sizeof(Protocol::SyncRequest) - Protocol::HEADER_SIZE;
+        reqFreq.source = source;
+        reqFreq.frequency = freqMHz;
+
+        QByteArray packetFreq(reinterpret_cast<const char*>(&reqFreq), sizeof(Protocol::SyncRequest));
+        socket->write(packetFreq);
+
+        logMessage(QString("Отправлен CMD_SYNC_FREQUENCY: %1 МГц").arg(freqMHz));
+    }
+}
+
+void MainWindow::onEepromWriteClicked()
+{
+    if (!isConnected || !socket) {
+        logMessage("EEPROM: нет подключения к серверу");
+        eepromStatusLabel->setText("Статус: нет подключения");
+        return;
+    }
+
+    eepromCurrentAddress = static_cast<quint32>(eepromAddressSpinBox->value());
+
+    QString sizeText = eepromSizeComboBox->currentText();
+    if (sizeText == "128 байт") {
+        eepromCurrentSize = 128;
+    } else if (sizeText == "256 байт") {
+        eepromCurrentSize = 256;
+    } else {
+        eepromCurrentSize = 512;
+    }
+
+    eepromWriteData.clear();
+
+    for (int i = 0; i < eepromCurrentSize; i++) {
+        char value = static_cast<char>(QRandomGenerator::global()->bounded(256));
+        eepromWriteData.append(value);
+    }
+
+    if (eepromCurrentSize == 128) {
+        Protocol::EepromWrite128Request req;
+        req.magic = Protocol::MAGIC;
+        req.command = Protocol::CMD_EEPROM_WRITE_128;
+        req.messageId = 0;
+        req.flags = Protocol::FLAG_REQUEST;
+        req.payloadSize = sizeof(Protocol::EepromWrite128Request) - Protocol::HEADER_SIZE;
+        req.address = eepromCurrentAddress;
+
+        for (int i = 0; i < 128; i++) {
+            req.data[i] = static_cast<uint8_t>(eepromWriteData[i]);
+        }
+
+        socket->write(QByteArray(reinterpret_cast<const char*>(&req), sizeof(req)));
+    }
+    else if (eepromCurrentSize == 256) {
+        Protocol::EepromWrite256Request req;
+        req.magic = Protocol::MAGIC;
+        req.command = Protocol::CMD_EEPROM_WRITE_256;
+        req.messageId = 0;
+        req.flags = Protocol::FLAG_REQUEST;
+        req.payloadSize = sizeof(Protocol::EepromWrite256Request) - Protocol::HEADER_SIZE;
+        req.address = eepromCurrentAddress;
+
+        for (int i = 0; i < 256; i++) {
+            req.data[i] = static_cast<uint8_t>(eepromWriteData[i]);
+        }
+
+        socket->write(QByteArray(reinterpret_cast<const char*>(&req), sizeof(req)));
+    }
+    else if (eepromCurrentSize == 512) {
+        Protocol::EepromWrite512Request req;
+        req.magic = Protocol::MAGIC;
+        req.command = Protocol::CMD_EEPROM_WRITE_512;
+        req.messageId = 0;
+        req.flags = Protocol::FLAG_REQUEST;
+        req.payloadSize = sizeof(Protocol::EepromWrite512Request) - Protocol::HEADER_SIZE;
+        req.address = eepromCurrentAddress;
+
+        for (int i = 0; i < 512; i++) {
+            req.data[i] = static_cast<uint8_t>(eepromWriteData[i]);
+        }
+
+        socket->write(QByteArray(reinterpret_cast<const char*>(&req), sizeof(req)));
+    }
+
+    logMessage(QString("EEPROM: отправлена запись %1 байт по адресу %2")
+                   .arg(eepromCurrentSize)
+                   .arg(eepromCurrentAddress));
+
+    eepromStatusLabel->setText("Статус: запись отправлена");
+}
+
+void MainWindow::onEepromReadClicked()
+{
+    if (!isConnected || !socket) {
+        logMessage("EEPROM: нет подключения к серверу");
+        eepromStatusLabel->setText("Статус: нет подключения");
+        return;
+    }
+
+    eepromCurrentAddress = static_cast<quint32>(eepromAddressSpinBox->value());
+
+    QString sizeText = eepromSizeComboBox->currentText();
+    if (sizeText == "128 байт") {
+        eepromCurrentSize = 128;
+    } else if (sizeText == "256 байт") {
+        eepromCurrentSize = 256;
+    } else {
+        eepromCurrentSize = 512;
+    }
+
+    if (eepromCurrentSize == 128) {
+        Protocol::EepromRead128Request req;
+        req.magic = Protocol::MAGIC;
+        req.command = Protocol::CMD_EEPROM_READ_128;
+        req.messageId = 0;
+        req.flags = Protocol::FLAG_REQUEST;
+        req.payloadSize = sizeof(Protocol::EepromRead128Request) - Protocol::HEADER_SIZE;
+        req.address = eepromCurrentAddress;
+
+        socket->write(QByteArray(reinterpret_cast<const char*>(&req), sizeof(req)));
+    }
+    else if (eepromCurrentSize == 256) {
+        Protocol::EepromRead256Request req;
+        req.magic = Protocol::MAGIC;
+        req.command = Protocol::CMD_EEPROM_READ_256;
+        req.messageId = 0;
+        req.flags = Protocol::FLAG_REQUEST;
+        req.payloadSize = sizeof(Protocol::EepromRead256Request) - Protocol::HEADER_SIZE;
+        req.address = eepromCurrentAddress;
+
+        socket->write(QByteArray(reinterpret_cast<const char*>(&req), sizeof(req)));
+    }
+    else if (eepromCurrentSize == 512) {
+        Protocol::EepromRead512Request req;
+        req.magic = Protocol::MAGIC;
+        req.command = Protocol::CMD_EEPROM_READ_512;
+        req.messageId = 0;
+        req.flags = Protocol::FLAG_REQUEST;
+        req.payloadSize = sizeof(Protocol::EepromRead512Request) - Protocol::HEADER_SIZE;
+        req.address = eepromCurrentAddress;
+
+        socket->write(QByteArray(reinterpret_cast<const char*>(&req), sizeof(req)));
+    }
+
+    logMessage(QString("EEPROM: отправлен запрос чтения %1 байт по адресу %2")
+                   .arg(eepromCurrentSize)
+                   .arg(eepromCurrentAddress));
+
+    eepromStatusLabel->setText("Статус: запрос чтения отправлен");
+}

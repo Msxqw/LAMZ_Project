@@ -18,7 +18,9 @@
 #include <QComboBox>
 #include <QSpinBox>
 #include <cstdint>
-
+#include <QRadioButton>
+#include <QButtonGroup>
+#include <QRandomGenerator>
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -58,9 +60,12 @@ private slots:
     void onSave();
     void onLoad();
     void onApplyStrobe();
-
     void updateRowDataEditable(int row);
     void logMessage(QString msg);
+    void onApplySync();
+    void onSyncSourceChanged();
+    void onEepromWriteClicked();
+    void onEepromReadClicked();
 
 private:
     void setupUi();
@@ -90,6 +95,26 @@ private:
     QSpinBox *periodSpinBox = nullptr;
     QSpinBox *pulseSpinBox = nullptr;
     QPushButton *applyStrobeButton = nullptr;
+
+    QWidget *syncTab = nullptr;
+    QRadioButton *internalSourceRadio = nullptr;
+    QRadioButton *externalSourceRadio = nullptr;
+    QButtonGroup *syncSourceGroup = nullptr;
+    QSpinBox *syncFreqSpinBox = nullptr;
+    QPushButton *applySyncButton = nullptr;
+    QLabel *syncHintLabel = nullptr;
+
+    QWidget *eepromTab = nullptr;
+    QSpinBox *eepromAddressSpinBox = nullptr;
+    QComboBox *eepromSizeComboBox = nullptr;
+    QPushButton *eepromWriteButton = nullptr;
+    QPushButton *eepromReadButton = nullptr;
+    QLabel *eepromStatusLabel = nullptr;
+    QByteArray eepromWriteData;
+    QByteArray eepromReadData;
+    int eepromCurrentSize = 0;
+    quint32 eepromCurrentAddress = 0;
+
 };
 
 #endif // MAINWINDOW_H
