@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QByteArray>
 #include <QDebug>
+#include "protocol.h"
 
 class Parser : public QObject
 {
