@@ -1,18 +1,23 @@
 #ifndef AD9122_H
 #define AD9122_H
 
+#include <cstdint>
+
 namespace AD9122_IC {
     /*АДРЕСА РЕГИСТРОВ*/
-    static constexpr uint8_t REG_COMM = 0x00;
-    static constexpr uint8_t REG_POWER = 0x01;
-    static constexpr uint8_t REG_FIFO_CONTROL = 0x17;
-    static constexpr uint8_t REG_FIFO_STATUS = 0x18;
-    static constexpr uint8_t REG_CHIP_ID = 0x1F;
-    static constexpr uint8_t REG_REVISION = 0x7F;
+    enum Register : uint8_t
+    {
+        REG_COMM = 0x00,
+        REG_POWER = 0x01,
+        REG_FIFO_CONTROL = 0x17,
+        REG_FIFO_STATUS = 0x18,
+        REG_CHIP_ID = 0x1F,
+        REG_REVISION = 0x7F
+    };
 
     /*ОБЪЕДИНЕНИЕ РЕГИСТРОВ*/
     #pragma pack(push, 1)
-    //0x18
+    //0x18 (R)
     union FifoStat_u
     {
         uint8_t all_reg;
@@ -26,7 +31,7 @@ namespace AD9122_IC {
         } bits;
     };
 
-    //0x17
+    //0x17 (RW)
     union FifoControl_u
     {
         uint8_t all_reg;
@@ -36,7 +41,7 @@ namespace AD9122_IC {
         } bits;
     };
 
-    //0x00
+    //0x00 (RW)
     union Comm_u
     {
         uint8_t all_reg;
@@ -48,7 +53,7 @@ namespace AD9122_IC {
         } bits;
     };
 
-    //0x01
+    //0x01 (RW)
     union PowerControl_u
     {
         uint8_t all_reg;
@@ -58,16 +63,16 @@ namespace AD9122_IC {
             uint8_t power_down_data_receiver : 1;
             uint8_t power_down_qdac : 1;
             uint8_t power_down_idac : 1;
-        };
+        } bits;
     };
 
-    //0x1F
+    //0x1F (R)
     union ChipID_u
     {
         uint8_t chip : 8;
     };
 
-    //0x7F
+    //0x7F (R)
     union Revision_u
     {
         uint8_t all_reg;
@@ -79,7 +84,11 @@ namespace AD9122_IC {
     };
     #pragma pack (pop)
 
-    void processRead (uint8_t ic_addr, uint32_t result);
+    /*Проверка на валидность регистра*/
+    bool isValidRegister(uint8_t ic_addr);
+
+    /*Процесс чтения регистра микросхемы*/
+    void processReadValue (uint8_t ic_addr, uint32_t result);
 }
 
 #endif // AD9122_H
