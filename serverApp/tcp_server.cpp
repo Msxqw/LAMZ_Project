@@ -80,6 +80,9 @@ void TcpServer::onReadyRead()
         if (buffer.size() < fullSize)
             return;
 
+        qDebug() << "Получен пакет размером: " << buffer.size() << " байт";
+        qDebug() << buffer;
+
         // Отправляем дальше в parser
         emit dataReceived(buffer);
 

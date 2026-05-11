@@ -16,7 +16,6 @@ public:
     explicit TcpServer (Parser *parser, int port, QObject *parent = nullptr);
     ~TcpServer();
 
-
 signals:
     void dataReceived(const QByteArray &data);
 
