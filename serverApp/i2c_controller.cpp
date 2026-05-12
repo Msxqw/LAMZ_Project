@@ -4,13 +4,12 @@
 #include <iostream>
 #include <sys/ioctl.h>
 #include <linux/i2c-dev.h>
-
-int i2c_fd = -1;
+#include <linux/i2c.h>
 
 bool i2c_init(uint8_t slaveAddr)
 {
     //Открываем файл устройства I2C
-    i2c_fd = open("/dev/i2c-0", O_RDWR);
+    i2c_fd = open("/dev/i2c-3", O_RDWR);
     if (i2c_fd < 0)
     {
         std::cerr << "I2C: Ошибка открытия\n";
@@ -18,7 +17,7 @@ bool i2c_init(uint8_t slaveAddr)
     }
 
     //Указываем драйверу, с каким адресом на шине мы будем работать (адрес slave-устройства)
-    if (ioctl(i2c_fd, I2C_SLAVE, slaveAddr) < 0) {
+    if (ioctl(i2c_fd, I2C_SLAVE_FORCE, slaveAddr) < 0) {
         std::cerr << "I2C: Ошибка установки адреса Slave";
         close(i2c_fd);
         i2c_fd = -1;
@@ -29,43 +28,76 @@ bool i2c_init(uint8_t slaveAddr)
     return true;
 }
 
-bool i2c_read(uint8_t regAddr, uint8_t &data)
+bool i2c_read(uint8_t slaveAddr, uint8_t regAddr, uint8_t &data)
 {
     if (i2c_fd < 0) return false;
 
-    if (write(i2c_fd, &regAddr, 1) != 1)
-    {
-        std::cerr << "I2C: Ошибка выбора регистра";
+    struct i2c_msg msgs[2];
+    uint8_t reg = regAddr;
+
+    // Первое сообщение: отправить адрес регистра (запись)
+    msgs[0].addr = slaveAddr;          // адрес EEPROM
+    msgs[0].flags = 0;            // 0 = запись
+    msgs[0].len = 1;
+    msgs[0].buf = &reg;
+
+    // Второе сообщение: прочитать байт данных (чтение)
+    msgs[1].addr = slaveAddr;
+    msgs[1].flags = I2C_M_RD;     // флаг чтения
+    msgs[1].len = 1;
+    msgs[1].buf = &data;
+
+    struct i2c_rdwr_ioctl_data ioctl_data;
+    ioctl_data.msgs = msgs;
+    ioctl_data.nmsgs = 2;
+
+    if (ioctl(i2c_fd, I2C_RDWR, &ioctl_data) < 0) {
+        std::cerr << "I2C: Ошибка чтения" << std::endl;
         return false;
     }
-
-    if (read(i2c_fd, &data, 1) != 1)
-    {
-        std::cerr << "I2C: Ошибка чтения данных";
-        return false;
-    }
-
-    std::cout << "I2C: Операция выполнена успешно";
+    std::cout << "I2C: Чтение выполнена успешно" << std::endl;
     return true;
 }
 
-bool i2c_write(uint8_t regAddr, uint8_t data)
+// Передавать массив данных или вектор! (две записи сперва слэйв, после адрес)
+// Для отладки i2c-tools
+bool i2c_write(uint8_t slaveAddr, uint8_t regAddr, uint8_t data)
 {
     if (i2c_fd < 0) return false;
 
     uint8_t buffer[2] = {regAddr, data};
 
-    if (write(i2c_fd, buffer, 2) != 2)
+    struct i2c_msg msg;
+
+    msg.addr  = slaveAddr;
+    msg.flags = 0;
+    msg.len   = sizeof(buffer);
+    msg.buf   = buffer;
+
+    struct i2c_rdwr_ioctl_data ioctl_data;
+
+    ioctl_data.msgs  = &msg;
+    ioctl_data.nmsgs = 1;
+
+    if (ioctl(i2c_fd, I2C_RDWR, &ioctl_data) < 0)
     {
-        std::cerr << "I2C: Ошибка записи данных";
+        std::cerr << "I2C: Ошибка записи" << std::endl;
         return false;
     }
 
-    std::cout << "I2C: Операция выполнена успешно";
+    // EEPROM busy delay
+    usleep(5000);
+
+    std::cout << "I2C: Запись выполнена успешно" << std::endl;
+
     return true;
 }
 
 void i2c_deinit()
 {
-    if (i2c_fd >=0) close(i2c_fd);
+    if (i2c_fd >=0)
+    {
+        close(i2c_fd);
+        i2c_fd = -1;
+    }
 }

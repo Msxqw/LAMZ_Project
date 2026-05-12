@@ -2,6 +2,7 @@
 #define I2C_CONTROLER_H
 
 #include <cstdint>
+inline int i2c_fd = -1;
 
 /*Инициализация шины*/
 bool i2c_init(uint8_t slaveAddr);
