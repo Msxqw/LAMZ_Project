@@ -24,6 +24,8 @@ signals:
 private:
     // Обработка SPI-команд
     void handleSpiRequest(const QByteArray &data);
+    // Обработка I2C-команд
+    void handleI2CRequest(const QByteArray &data);
 };
 
 #endif // PARSER_H
