@@ -3,30 +3,23 @@
 
 #include <cstdint>
 
-/*Биты для записи/чтения*/
-static constexpr uint8_t SPI_READ_BIT = 0x80;
-static constexpr uint8_t SPI_WRITE_BIT = 0x00;
-
-/*Базовый адрес SPI IP*/
-static constexpr uint32_t BASE_ADDR_SPI = 0x43C00000;
-// static constexpr uint32_t BASE_ADDR_SPIHMC = 0x40000000;
-// static constexpr uint32_t BASE_ADDR_SPIHMC = 0x40000000;
-// static constexpr uint32_t BASE_ADDR_SPILMK = 0x40000000;
+/*Базовые адреса SPI IP микросхем*/
+static constexpr uint32_t BASE_ADDR_SPI_AD = 0x43C10000;
+static constexpr uint32_t BASE_ADDR_SPI_HMC = 0x43C20000;
+static constexpr uint32_t BASE_ADDR_SPI_LMK = 0x43C30000;
 
 /*Смещение регистров*/
 static constexpr uint32_t SPI_TX_CMD_RW = 0x00;
 static constexpr uint32_t SPI_TX_DATA_RW = 0x04;
 static constexpr uint32_t SPI_RX_CMD_RW = 0x08;
 static constexpr uint32_t SPI_RX_DATA_RO = 0x0C;
-static constexpr uint32_t SPI_IP_STNG_RO = 0x18;
 
 /*Функции взаимодействия Сервер -> SPI IP*/
-uint32_t readReg(uint8_t addr);
-void writeReg(uint8_t addr, uint32_t data);
-uint32_t readIPCR();
+uint32_t spi_readReg(uint8_t addr);
+void spi_writeReg(uint8_t addr, uint32_t data);
 
 /*Функции инициализации/деинициализации*/
-bool init();
-void deinit();
+bool spi_init();
+void spi_deinit();
 
 #endif // SPI_CONTROLLER_H
